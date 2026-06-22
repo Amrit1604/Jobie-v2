@@ -190,25 +190,41 @@ export const saveProfileDual = async (userId: number, data: any) => {
 export const syncUserToMongo = async (userData: any) => {
   if (!isMongoReady()) return;
   try {
-    await MongoUser.findOneAndUpdate(
-      { sqlId: userData.id },
-      {
-        $set: {
-          name: userData.name,
-          email: userData.email,
-          password: userData.password,
-          role: userData.role,
-          firebaseUid: userData.firebaseUid,
-          githubUid: userData.githubUid,
-          banned: userData.banned,
-        },
+    const payload = {
+      $set: {
+        sqlId: userData.id,
+        name: userData.name,
+        email: userData.email,
+        password: userData.password,
+        role: userData.role,
+        firebaseUid: userData.firebaseUid,
+        githubUid: userData.githubUid,
+        banned: userData.banned,
       },
-      { upsert: true }
-    );
+    };
+
+    // Try to find by sqlId first (the normal case)
+    const byId = await MongoUser.findOne({ sqlId: userData.id });
+    if (byId) {
+      await MongoUser.findOneAndUpdate({ sqlId: userData.id }, payload, { new: true });
+      return;
+    }
+
+    // sqlId not found — check if email already exists (e.g. after DB migration with new ids)
+    const byEmail = await MongoUser.findOne({ email: userData.email });
+    if (byEmail) {
+      // Update the existing doc to match the new sqlId from MySQL
+      await MongoUser.findOneAndUpdate({ email: userData.email }, payload, { new: true });
+      return;
+    }
+
+    // Truly new user — insert
+    await MongoUser.create({ sqlId: userData.id, name: userData.name, email: userData.email, password: userData.password, role: userData.role, firebaseUid: userData.firebaseUid, githubUid: userData.githubUid, banned: userData.banned ?? false });
   } catch (err: any) {
     console.error("Sync to Mongo user failed:", err?.message || err);
   }
 };
+
 
 export const syncProfileToMongo = async (profileData: any) => {
   if (!isMongoReady()) return;
