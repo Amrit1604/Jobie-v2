@@ -31,23 +31,28 @@ export default function LoginPage() {
   useEffect(() => {
     const checkRedirect = async () => {
       try {
+        console.log("CHECKING REDIRECT RESULT ON MOUNT...");
         const result = await getRedirectResult(auth);
+        console.log("REDIRECT RESULT:", result);
         if (!result) return;
         setLoading(true);
         const credential = GoogleAuthProvider.credentialFromResult(result) || GithubAuthProvider.credentialFromResult(result);
         const { githubUsername, githubUid } = await fetchGithubInfo(credential?.accessToken);
         const idToken = await result.user.getIdToken();
 
+        console.log("GOT ID TOKEN FROM REDIRECT, SENDING TO BACKEND...");
         const data = await api.post('/api/auth/firebase-login', {
           token: idToken,
           githubUsername,
           githubUid
         });
+        console.log("BACKEND RESPONSE FROM REDIRECT:", data);
 
         setAuth(data.token, data.user);
         toast({ type: 'success', emoji: '👋', title: `Welcome back, ${data.user?.name?.split(' ')[0] ?? 'there'}!`, message: 'Redirecting…' });
         await routeAfterAuth(data.user);
       } catch (err: unknown) {
+        console.error("ERROR IN CHECK REDIRECT:", err);
         if (await maybeHandleAccountLinking(err)) return;
         if (maybeHandleBackendConflict(err)) return;
         setError(err instanceof Error ? err.message : 'Sign-in failed');
@@ -211,21 +216,26 @@ export default function LoginPage() {
   };
 
   const handleSocialLogin = async (provider: GoogleAuthProvider | GithubAuthProvider) => {
+    console.log("STARTING SOCIAL LOGIN");
     setError('');
     setLoading(true);
     try {
       const result = await signInWithPopup(auth, provider);
+      console.log("FIREBASE POPUP SUCCESS:", result.user);
       const credential = GoogleAuthProvider.credentialFromResult(result) || GithubAuthProvider.credentialFromResult(result);
       const { githubUsername, githubUid } = await fetchGithubInfo(credential?.accessToken);
       const idToken = await result.user.getIdToken();
+      console.log("GOT ID TOKEN, SENDING TO BACKEND...");
 
       const data = await api.post('/api/auth/firebase-login', {
         token: idToken,
         githubUsername,
         githubUid
       });
+      console.log("BACKEND RESPONSE:", data);
 
       setAuth(data.token, data.user);
+      console.log("AUTH SET, ROUTING AFTER AUTH...", data.user);
       toast({
         type: 'success',
         emoji: '👋',
@@ -234,8 +244,10 @@ export default function LoginPage() {
       });
       await routeAfterAuth(data.user);
     } catch (err: unknown) {
+      console.error("CAUGHT ERROR IN SOCIAL LOGIN:", err);
       const fbErr = err as { code?: string };
       if (fbErr.code === 'auth/popup-blocked' || fbErr.code === 'auth/cancelled-popup-request') {
+        console.log("POPUP BLOCKED OR CANCELLED. Redirecting...");
         toast({ type: 'info', title: 'Redirecting', message: 'Popup blocked. Redirecting to provider...' });
         await signInWithRedirect(auth, provider);
         return;
@@ -246,6 +258,7 @@ export default function LoginPage() {
       setError(msg);
       toast({ type: 'error', title: 'Sign-in failed', message: msg });
     } finally {
+      console.log("FINALLY BLOCK REACHED");
       setLoading(false);
     }
   };
