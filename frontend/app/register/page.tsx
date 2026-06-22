@@ -1,15 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { api, setAuth } from '../lib/api';
 import { useToast } from '../components/ToastProvider';
-import type { FirebaseError } from 'firebase/app';
 import {
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   GithubAuthProvider,
   GoogleAuthProvider,
   fetchSignInMethodsForEmail,
@@ -23,45 +21,7 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  useEffect(() => {
-    const handleRedirectResult = async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (!result) return;
 
-        setLoading(true);
-        const credential = GoogleAuthProvider.credentialFromResult(result) || GithubAuthProvider.credentialFromResult(result);
-        const { githubUsername, githubUid } = await fetchGithubInfo(credential?.accessToken);
-        const idToken = await result.user.getIdToken();
-
-        const data = await api.post('/api/auth/firebase-login', { 
-          token: idToken, 
-          githubUsername, 
-          githubUid 
-        });
-
-        setAuth(data.token, data.user);
-        
-        toast({
-          type: 'success',
-          emoji: '🎉',
-          title: `Welcome, ${data.user?.name?.split(' ')[0] ?? 'there'}!`,
-          message: 'Your account is ready. Redirecting…',
-        });
-
-        await routeAfterAuth(data.user);
-      } catch (err: unknown) {
-        if (await maybeHandleAccountLinking(err)) return;
-        const msg = err instanceof Error ? err.message : 'Sign-up failed';
-        setError(msg);
-        toast({ type: 'error', title: 'Sign-up failed', message: msg });
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    handleRedirectResult();
-  }, []);
 
   const fetchGithubInfo = async (accessToken?: string) => {
     if (!accessToken) return { githubUsername: undefined as string | undefined, githubUid: undefined as string | undefined };
@@ -193,31 +153,49 @@ export default function RegisterPage() {
     }
   };
 
-  const handleGoogleSignup = async () => {
+  const handleSocialSignup = async (provider: GoogleAuthProvider | GithubAuthProvider) => {
+    setError('');
+    setLoading(true);
     try {
-      googleProvider.setCustomParameters({ prompt: 'select_account' });
-      await signInWithRedirect(auth, googleProvider);
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result) || GithubAuthProvider.credentialFromResult(result);
+      const { githubUsername, githubUid } = await fetchGithubInfo(credential?.accessToken);
+      const idToken = await result.user.getIdToken();
+
+      const data = await api.post('/api/auth/firebase-login', {
+        token: idToken,
+        githubUsername,
+        githubUid
+      });
+
+      setAuth(data.token, data.user);
+      toast({
+        type: 'success',
+        emoji: '🎉',
+        title: `Welcome, ${data.user?.name?.split(' ')[0] ?? 'there'}!`,
+        message: 'Your account is ready. Redirecting…',
+      });
+      await routeAfterAuth(data.user);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Google signup failed';
+      if (await maybeHandleAccountLinking(err)) return;
+      const msg = err instanceof Error ? err.message : 'Sign-up failed';
       setError(msg);
-      toast({ type: 'error', title: 'Google sign-up failed', message: msg });
+      toast({ type: 'error', title: 'Sign-up failed', message: msg });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleGithubSignup = async () => {
-    try {
-      githubProvider.setCustomParameters({
-        allow_signup: 'true',
-        prompt: 'select_account'
-      });
-      githubProvider.addScope('read:user');
-      githubProvider.addScope('user:email');
-      await signInWithRedirect(auth, githubProvider);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'GitHub signup failed';
-      setError(msg);
-      toast({ type: 'error', title: 'GitHub sign-up failed', message: msg });
-    }
+  const handleGoogleSignup = () => {
+    googleProvider.setCustomParameters({ prompt: 'select_account' });
+    handleSocialSignup(googleProvider);
+  };
+
+  const handleGithubSignup = () => {
+    githubProvider.setCustomParameters({ allow_signup: 'true' });
+    githubProvider.addScope('read:user');
+    githubProvider.addScope('user:email');
+    handleSocialSignup(githubProvider);
   };
 
   return (
