@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -8,6 +8,8 @@ import { api, isApiError, setAuth } from '../lib/api';
 import { useToast } from '../components/ToastProvider';
 import {
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GithubAuthProvider,
   GoogleAuthProvider,
   fetchSignInMethodsForEmail,
@@ -26,7 +28,36 @@ export default function LoginPage() {
     accounts: Array<{ id?: number; email?: string; name?: string; match?: string }>;
   } | null>(null);
 
+  useEffect(() => {
+    const checkRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (!result) return;
+        setLoading(true);
+        const credential = GoogleAuthProvider.credentialFromResult(result) || GithubAuthProvider.credentialFromResult(result);
+        const { githubUsername, githubUid } = await fetchGithubInfo(credential?.accessToken);
+        const idToken = await result.user.getIdToken();
 
+        const data = await api.post('/api/auth/firebase-login', {
+          token: idToken,
+          githubUsername,
+          githubUid
+        });
+
+        setAuth(data.token, data.user);
+        toast({ type: 'success', emoji: '👋', title: `Welcome back, ${data.user?.name?.split(' ')[0] ?? 'there'}!`, message: 'Redirecting…' });
+        await routeAfterAuth(data.user);
+      } catch (err: unknown) {
+        if (await maybeHandleAccountLinking(err)) return;
+        if (maybeHandleBackendConflict(err)) return;
+        setError(err instanceof Error ? err.message : 'Sign-in failed');
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkRedirect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchGithubInfo = async (accessToken?: string) => {
     if (!accessToken) return { githubUsername: undefined as string | undefined, githubUid: undefined as string | undefined };
@@ -203,6 +234,12 @@ export default function LoginPage() {
       });
       await routeAfterAuth(data.user);
     } catch (err: unknown) {
+      const fbErr = err as { code?: string };
+      if (fbErr.code === 'auth/popup-blocked' || fbErr.code === 'auth/cancelled-popup-request') {
+        toast({ type: 'info', title: 'Redirecting', message: 'Popup blocked. Redirecting to provider...' });
+        await signInWithRedirect(auth, provider);
+        return;
+      }
       if (await maybeHandleAccountLinking(err)) return;
       if (maybeHandleBackendConflict(err)) return;
       const msg = err instanceof Error ? err.message : 'Sign-in failed';
