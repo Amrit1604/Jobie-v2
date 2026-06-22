@@ -16,6 +16,7 @@ node_modules/
 serviceAccountKey.json
 *serviceAccountKey*.json
 firebase-adminsdk*.json
+*firebase-adminsdk*.json
 
 # ── Build Output ───────────────────────────────────────────────────────────────
 dist/
